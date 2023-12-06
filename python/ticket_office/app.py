@@ -1,20 +1,37 @@
 import json
-
+from dataclasses import dataclass
 import requests
 from flask import Flask, request
 
-class TrainData():
+
+class TrainData:
     def __init__(self):
         self.session = requests.Session()
 
     def train(self, id):
-        train_data = self.session.get(
-            f"http://localhost:8081/data_for_train/" + id
-        ).json()
+        
         return train_data
     
     def bookingReference(self):
-        return self.session.get("http://localhost:8082/booking_reference").text
+        return 
+
+@dataclass
+class Seat:
+    number: int
+    coach: str
+    booking_reference: str = ''
+@dataclass
+class Train:
+    id: str
+    seats: Seat
+
+    def load(self, train_data, train_id):
+        self.id = train_id
+        for s in train_data["seats"].values():
+            self.seats.append(Seat(s["seat_number"], s["booking_reference"], s["coach"]))
+
+    def getAvailableSeats(self):
+        return (s for s in self.seats if s.coach == "A" and not s.booking_reference)
 
 def get_available_seats(train):
     return (
@@ -23,14 +40,14 @@ def get_available_seats(train):
         if s["coach"] == "A" and not s["booking_reference"]
     )
 
-def create_reservation(seat_count, train_id, booking_reference, train):
-    available_seats = get_available_seats(train)
+def create_reservation(seat_count, booking_reference, train: Train):
+    available_seats = train.getAvailableSeats()
     to_reserve = []
     for i in range(seat_count):
         to_reserve.append(next(available_seats))
-    seat_ids = [s["seat_number"] + s["coach"] for s in to_reserve]
+    seat_ids = [f"{s.number}{s.coach}" for s in to_reserve]
     return {
-        "train_id": train_id,
+        "train_id": train.id,
         "booking_reference": booking_reference,
         "seats": seat_ids,
     }
@@ -44,12 +61,17 @@ def create_app():
         seat_count = payload["count"]
         train_id = payload["train_id"]
 
-        train_data = TrainData()
+        session = requests.Session()
 
-        booking_reference = train_data.bookingReference()
-        train = train_data.train(train_id)
+        booking_reference = session.get("http://localhost:8082/booking_reference").text
 
-        reservation = create_reservation(seat_count, train_id, booking_reference, train)
+        train_data = session.get(
+            f"http://localhost:8081/data_for_train/" + train_id
+        ).json()
+
+        train = Train().load(train_data, train_id)
+
+        reservation = create_reservation(seat_count, booking_reference, train)
 
         reservation_payload = {
             "train_id": reservation["train_id"],
